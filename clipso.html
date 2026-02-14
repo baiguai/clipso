@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clipso</title>
+    <style>
+        :root {
+            --background-color: #000;
+            --text-color: #FFF;
+            --selected-bg-color: #444;
+            --pinned-color: #FFD700; /* Gold */
+            --search-bg-color: #222;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            font-family: 'monospace', 'Courier New', Courier;
+            margin: 0;
+            padding: 1em;
+        }
+
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 95vh;
+        }
+
+        #clips-container {
+            flex-grow: 1;
+            overflow-y: auto;
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .clip-item {
+            padding: 2px 5px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            cursor: pointer;
+        }
+
+        .clip-item.selected {
+            background-color: var(--selected-bg-color);
+        }
+
+        .clip-item .pin-indicator {
+            color: var(--pinned-color);
+            display: inline-block;
+            width: 1em;
+            text-align: center;
+        }
+        
+        .clip-item .pin-indicator.pinned {
+            font-weight: bold;
+        }
+
+        #search-container {
+            display: none; /* Hidden by default */
+            padding: 5px;
+            background-color: var(--search-bg-color);
+        }
+
+        #search-input {
+            width: 100%;
+            background-color: var(--search-bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--text-color);
+            padding: 5px;
+            font-family: inherit;
+        }
+
+        #help {
+            display: none; /* Hidden by default */
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #111;
+            padding: 4px;
+            font-size: 0.8em;
+            text-align: center;
+            border-top: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <ul id="clips-container"></ul>
+        <div id="search-container">
+            <input type="text" id="search-input" placeholder="Search...">
+        </div>
+    </div>
+
+    <div id="help">[paste] | [enter] copy | [d] delete | [P] pin | [j/k] move | [g/G] top/bottom | ['] pinned | [/] search | [esc] normal</div>
+
+    <!-- The initial clips data is stored here. -->
+    <script id="clipso-data" type="application/json">
+        [
+            { "content": "Welcome to Clipso! Press 'p' to paste your first clip.", "pinned": false, "timestamp": 1676259600000 }
+        ]
+    </script>
+
+    <script>
+        // --- App State ---
+        const CLIP_LIMIT = 900;
+        let clips = [];
+        let selectedIndex = 0;
+        let mode = 'normal'; // 'normal', 'search', 'pinned_view'
+        let searchTerm = '';
+        let helpVisible = false; // New state variable
+
+        // --- DOM Elements ---
+        const clipsContainer = document.getElementById('clips-container');
+        const searchContainer = document.getElementById('search-container');
+        const searchInput = document.getElementById('search-input');
+        const dataScript = document.getElementById('clipso-data');
+        const helpElement = document.getElementById('help'); // Get the help element
+
+        // --- Core Functions ---
+
+        function loadClips() {
+            try {
+                const data = JSON.parse(dataScript.textContent);
+                clips = Array.isArray(data) ? data : [];
+                enforceClipLimit();
+            } catch (e) {
+                console.error("Could not parse clips data:", e);
+                clips = [{ content: "Error loading clips. Data might be corrupt.", pinned: false, timestamp: Date.now() }];
+            }
+        }
+
+        function getVisibleClips() {
+            let visibleClips = clips;
+            if (mode === 'pinned_view') {
+                visibleClips = clips.filter(clip => clip.pinned);
+            } else if (mode === 'search' && searchTerm) {
+                visibleClips = clips.filter(clip => clip.content.toLowerCase().includes(searchTerm.toLowerCase()));
+            }
+            return visibleClips;
+        }
+
+        function render() {
+            clipsContainer.innerHTML = '';
+            const visibleClips = getVisibleClips();
+
+            if (visibleClips.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'clip-item';
+                li.textContent = mode === 'pinned_view' ? 'No pinned clips.' : 'No clips found.';
+                clipsContainer.appendChild(li);
+                return;
+            }
+
+            visibleClips.forEach((clip, index) => {
+                const li = document.createElement('li');
+                li.className = 'clip-item';
+
+                // Find the original index to see if it's the selected one
+                const originalIndex = clips.indexOf(clip);
+                if (originalIndex === selectedIndex) {
+                    li.classList.add('selected');
+                }
+                
+                const pinIndicator = document.createElement('span');
+                pinIndicator.className = 'pin-indicator';
+                pinIndicator.textContent = clip.pinned ? 'P' : ' ';
+                
+                const contentSpan = document.createElement('span');
+                contentSpan.textContent = clip.content;
+
+                li.appendChild(pinIndicator);
+                li.appendChild(contentSpan);
+
+                li.addEventListener('click', () => {
+                    selectedIndex = originalIndex;
+                    render();
+                });
+
+                clipsContainer.appendChild(li);
+            });
+            scrollToSelected();
+        }
+
+        function scrollToSelected() {
+            const selectedElement = clipsContainer.querySelector('.selected');
+            if (selectedElement) {
+                selectedElement.scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        function saveAndReload() {
+            const currentHtml = document.documentElement.outerHTML;
+            const dataRegex = new RegExp('<script id="clipso-data" type="application\\/json">[\\s\\S]*?<\\/scr' + 'ipt>');
+            const newClipsData = JSON.stringify(clips, null, 4);
+            const newScriptTag = `<script id="clipso-data" type="application/json">${'\n'}${newClipsData}${ '\n'}</scr` + `ipt>`;
+            const newHtml = currentHtml.replace(dataRegex, newScriptTag);
+
+            const blob = new Blob([newHtml], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'clipso.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            // To prevent stale state, we could reload, but it's disorienting.
+            // Better to just inform the user.
+            console.log("Saving new state. Please save the downloaded file and reopen.");
+        }
+
+
+        // --- Keybinding Handlers ---
+
+        document.addEventListener('keydown', (e) => {
+            // Pasting is now handled by a global 'paste' event listener.
+
+            if (mode === 'search') {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    enterNormalMode();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    copySelectedAndMoveToTop(); // Copy and move to top
+                    enterNormalMode();          // Then exit search mode
+                }
+                return; // Other keys are handled by the input
+            }
+
+            // Normal mode keybindings
+            switch(e.key) {
+                case 'j':
+                    e.preventDefault();
+                    moveSelection(1);
+                    break;
+                case 'k':
+                    e.preventDefault();
+                    moveSelection(-1);
+                    break;
+                case 'g':
+                    e.preventDefault();
+                    selectedIndex = 0;
+                    render();
+                    break;
+                case 'G':
+                    e.preventDefault();
+                    selectedIndex = clips.length - 1;
+                    render();
+                    break;
+                // Removed 'p' case, replaced by paste event listener
+                case 'd':
+                    e.preventDefault();
+                    deleteSelected();
+                    break;
+                case 'P':
+                    e.preventDefault();
+                    pinSelected();
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    copySelectedAndMoveToTop();
+                    break;
+                case '/':
+                    e.preventDefault();
+                    enterSearchMode();
+                    break;
+                case "'": // Single quote
+                    e.preventDefault();
+                    togglePinnedView();
+                    break;
+                case 'Escape':
+                    e.preventDefault();
+                    if (helpVisible) {
+                        toggleHelp();
+                    } else {
+                        enterNormalMode();
+                    }
+                    break;
+                case '?':
+                    e.preventDefault();
+                    toggleHelp();
+                    break;
+            }
+        });
+
+        document.addEventListener('paste', (e) => {
+            if (e.target.id === 'search-input') {
+                return; // Let the default paste happen for the search input
+            }
+
+            e.preventDefault();
+
+            const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+
+            if (text) {
+                const newClip = { content: text, pinned: false, timestamp: Date.now() };
+                clips.unshift(newClip);
+                enforceClipLimit();
+                selectedIndex = 0;
+                saveAndReload();
+                render();
+            }
+        });
+        
+        searchInput.addEventListener('input', (e) => {
+            searchTerm = e.target.value;
+            // In search mode, selection doesn't make sense in the same way.
+            // Let's just re-render the filtered list.
+            render();
+        });
+
+
+        // --- Action Functions ---
+
+        function enforceClipLimit() {
+            if (clips.length > CLIP_LIMIT) {
+                clips.length = CLIP_LIMIT; // Truncates the array, removing oldest items from the end
+            }
+        }
+
+        function moveSelection(delta) {
+            const visibleClips = getVisibleClips();
+            if (visibleClips.length === 0) return;
+
+            // Find current position in the visible list
+            const currentVisibleIndex = visibleClips.findIndex(c => clips.indexOf(c) === selectedIndex);
+            
+            let nextVisibleIndex = currentVisibleIndex + delta;
+
+            // Clamp to bounds
+            nextVisibleIndex = Math.max(0, Math.min(visibleClips.length - 1, nextVisibleIndex));
+
+            // Get the corresponding item from the visible list and find its original index
+            const nextClip = visibleClips[nextVisibleIndex];
+            selectedIndex = clips.indexOf(nextClip);
+
+            render();
+        }
+
+        function deleteSelected() {
+            if (clips.length > 0) {
+                clips.splice(selectedIndex, 1);
+                if (selectedIndex >= clips.length) {
+                    selectedIndex = clips.length - 1;
+                }
+                saveAndReload();
+                render();
+            }
+        }
+        
+        function pinSelected() {
+            if (clips.length > 0 && selectedIndex < clips.length) {
+                const clip = clips[selectedIndex];
+                clip.pinned = !clip.pinned;
+                saveAndReload();
+                render();
+            }
+        }
+
+        function copySelectedAndMoveToTop() {
+            if (clips.length === 0) return;
+
+            const selectedClip = clips[selectedIndex];
+            navigator.clipboard.writeText(selectedClip.content).then(() => {
+                // Move to top
+                clips.splice(selectedIndex, 1);
+                clips.unshift(selectedClip);
+                enforceClipLimit(); // Enforce limit after moving
+                selectedIndex = 0;
+                saveAndReload();
+                render();
+            }).catch(err => {
+                console.error('Could not copy text: ', err);
+                alert('Could not copy to clipboard.');
+            });
+        }
+        
+        function enterSearchMode() {
+            mode = 'search';
+            searchContainer.style.display = 'block';
+            searchInput.focus();
+            render();
+        }
+
+        function togglePinnedView() {
+            if (mode === 'pinned_view') {
+                enterNormalMode();
+            } else {
+                mode = 'pinned_view';
+                render();
+            }
+        }
+        
+        function enterNormalMode() {
+            mode = 'normal';
+            searchContainer.style.display = 'none';
+            searchInput.value = '';
+            searchTerm = '';
+            document.activeElement.blur(); // Remove focus from search input
+            render();
+        }
+
+        // --- Added for Help Toggle ---
+        function toggleHelp() {
+            helpVisible = !helpVisible;
+            helpElement.style.display = helpVisible ? 'block' : 'none';
+        }
+
+        // --- Initialization ---
+        function init() {
+            loadClips();
+            render();
+        }
+
+        init();
+    </script>
+</body>
+</html>
