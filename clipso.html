@@ -94,9 +94,7 @@
         </div>
     </div>
 
-    <div id="help">
-        [ctrl+v] paste | [enter] copy | [d] delete | [P] pin | [j/k] move | [g/G] top/bottom | ['] pinned | [/] search | [esc] normal
-    </div>
+    <div id="help">[paste] | [enter] copy | [d] delete | [P] pin | [j/k] move | [g/G] top/bottom | ['] pinned | [/] search | [esc] normal</div>
 
     <!-- The initial clips data is stored here. -->
     <script id="clipso-data" type="application/json">
@@ -217,12 +215,7 @@
         // --- Keybinding Handlers ---
 
         document.addEventListener('keydown', (e) => {
-            // Handle Ctrl+V for paste globally
-            if (e.ctrlKey && e.key === 'v') {
-                e.preventDefault();
-                pasteFromClipboard();
-                return;
-            }
+            // Pasting is now handled by a global 'paste' event listener.
 
             if (mode === 'search') {
                 if (e.key === 'Escape') {
@@ -256,7 +249,7 @@
                     selectedIndex = clips.length - 1;
                     render();
                     break;
-                // Removed 'p' case, replaced by Ctrl+V handler above
+                // Removed 'p' case, replaced by paste event listener
                 case 'd':
                     e.preventDefault();
                     deleteSelected();
@@ -289,6 +282,25 @@
                     e.preventDefault();
                     toggleHelp();
                     break;
+            }
+        });
+
+        document.addEventListener('paste', (e) => {
+            if (e.target.id === 'search-input') {
+                return; // Let the default paste happen for the search input
+            }
+
+            e.preventDefault();
+
+            const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+
+            if (text) {
+                const newClip = { content: text, pinned: false, timestamp: Date.now() };
+                clips.unshift(newClip);
+                enforceClipLimit();
+                selectedIndex = 0;
+                saveAndReload();
+                render();
             }
         });
         
@@ -325,23 +337,6 @@
             selectedIndex = clips.indexOf(nextClip);
 
             render();
-        }
-
-        async function pasteFromClipboard() {
-            try {
-                const text = await navigator.clipboard.readText();
-                if (text) {
-                    const newClip = { content: text, pinned: false, timestamp: Date.now() };
-                    clips.unshift(newClip); // Add to top
-                    enforceClipLimit(); // Enforce limit after adding
-                    selectedIndex = 0;
-                    saveAndReload();
-                    render();
-                }
-            } catch (err) {
-                console.error('Failed to read clipboard contents: ', err);
-                alert('Could not read from clipboard. Please ensure you have granted permission.');
-            }
         }
 
         function deleteSelected() {
