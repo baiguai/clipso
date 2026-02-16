@@ -316,7 +316,14 @@
 
         function enforceClipLimit() {
             if (clips.length > CLIP_LIMIT) {
-                clips.length = CLIP_LIMIT; // Truncates the array, removing oldest items from the end
+                // Filter out unpinned clips from the end until the limit is met
+                let clipsToRemove = clips.length - CLIP_LIMIT;
+                for (let i = clips.length - 1; i >= 0 && clipsToRemove > 0; i--) {
+                    if (!clips[i].pinned) {
+                        clips.splice(i, 1);
+                        clipsToRemove--;
+                    }
+                }
             }
         }
 
