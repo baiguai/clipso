@@ -46,6 +46,10 @@
             background-color: var(--selected-bg-color);
         }
 
+        .clip-item.search-selected {
+            background-color: #553;
+        }
+
         .clip-item .pin-indicator {
             color: var(--pinned-color);
             display: inline-block;
@@ -108,6 +112,7 @@
         const CLIP_LIMIT = 900;
         let clips = [];
         let selectedIndex = 0;
+        let searchSelectionIndex = 0;
         let mode = 'normal'; // 'normal', 'search', 'pinned_view'
         let searchTerm = '';
         let helpVisible = false; // New state variable
@@ -160,7 +165,11 @@
 
                 // Find the original index to see if it's the selected one
                 const originalIndex = clips.indexOf(clip);
-                if (originalIndex === selectedIndex) {
+                if (mode === 'search') {
+                    if (index === searchSelectionIndex) {
+                        li.classList.add('search-selected');
+                    }
+                } else if (originalIndex === selectedIndex) {
                     li.classList.add('selected');
                 }
                 
@@ -221,10 +230,20 @@
                 if (e.key === 'Escape') {
                     e.preventDefault();
                     enterNormalMode();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    moveSelection(-1);
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    moveSelection(1);
                 } else if (e.key === 'Enter') {
                     e.preventDefault();
-                    copySelectedAndMoveToTop(); // Copy and move to top
-                    enterNormalMode();          // Then exit search mode
+                    const visibleClips = getVisibleClips();
+                    if (visibleClips.length > 0 && searchSelectionIndex < visibleClips.length) {
+                        selectedIndex = clips.indexOf(visibleClips[searchSelectionIndex]);
+                        copySelectedAndMoveToTop();
+                        enterNormalMode();
+                    }
                 }
                 return; // Other keys are handled by the input
             }
@@ -306,6 +325,7 @@
         
         searchInput.addEventListener('input', (e) => {
             searchTerm = e.target.value;
+            searchSelectionIndex = 0; // Reset selection when search term changes
             // In search mode, selection doesn't make sense in the same way.
             // Let's just re-render the filtered list.
             render();
@@ -331,17 +351,30 @@
             const visibleClips = getVisibleClips();
             if (visibleClips.length === 0) return;
 
+            let currentSelection = (mode === 'search') ? searchSelectionIndex : selectedIndex;
+            
             // Find current position in the visible list
-            const currentVisibleIndex = visibleClips.findIndex(c => clips.indexOf(c) === selectedIndex);
+            let currentVisibleIndex;
+            if (mode === 'search') {
+                currentVisibleIndex = searchSelectionIndex;
+            } else {
+                currentVisibleIndex = visibleClips.findIndex(c => clips.indexOf(c) === selectedIndex);
+            }
             
             let nextVisibleIndex = currentVisibleIndex + delta;
 
             // Clamp to bounds
             nextVisibleIndex = Math.max(0, Math.min(visibleClips.length - 1, nextVisibleIndex));
 
-            // Get the corresponding item from the visible list and find its original index
-            const nextClip = visibleClips[nextVisibleIndex];
-            selectedIndex = clips.indexOf(nextClip);
+            if (mode === 'search') {
+                searchSelectionIndex = nextVisibleIndex;
+                // Update selectedIndex to point to the actual clip in the main array
+                selectedIndex = clips.indexOf(visibleClips[searchSelectionIndex]);
+            } else {
+                // Get the corresponding item from the visible list and find its original index
+                const nextClip = visibleClips[nextVisibleIndex];
+                selectedIndex = clips.indexOf(nextClip);
+            }
 
             render();
         }
@@ -386,6 +419,7 @@
         
         function enterSearchMode() {
             mode = 'search';
+            searchSelectionIndex = 0;
             searchContainer.style.display = 'block';
             searchInput.focus();
             render();
